@@ -1,0 +1,81 @@
+package hapi
+
+import (
+	"sync"
+	"sync/atomic"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/balancer/base"
+)
+
+var _ base.PickerBuilder = (*Picker)(nil)
+
+type Picker struct {
+	Logger *zap.Logger
+
+	mu      sync.RWMutex
+	proxies []balancer.SubConn
+	current uint64
+}
+
+func (p *Picker) Build(buildInfo base.PickerBuildInfo) balancer.Picker {
+	if len(buildInfo.ReadySCs) == 0 {
+		return base.NewErrPicker(balancer.ErrNoSubConnAvailable)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var proxies []balancer.SubConn
+	for sc := range buildInfo.ReadySCs {
+		proxies = append(proxies, sc)
+	}
+	p.proxies = proxies
+	return p
+}
+
+var _ balancer.Picker = (*Picker)(nil)
+
+func (p *Picker) Pick(info balancer.PickInfo) (
+	balancer.PickResult, error) {
+
+	p.Logger.Debug(
+		"hapi picker: called",
+		zap.String("FullMethodName", info.FullMethodName),
+		zap.Int("proxies", len(p.proxies)))
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var result balancer.PickResult
+
+	result.SubConn = p.nextProxy()
+
+	if result.SubConn == nil {
+		p.Logger.Debug(
+			"hapi picker: ErrNoSubConnAvailable",
+			zap.String("FullMethodName", info.FullMethodName),
+			zap.Int("proxies", len(p.proxies)),
+		)
+		return result, balancer.ErrNoSubConnAvailable
+	}
+	return result, nil
+}
+
+func (p *Picker) nextProxy() balancer.SubConn {
+	cur := atomic.AddUint64(&p.current, uint64(1))
+	len := uint64(len(p.proxies))
+	idx := int(cur % len)
+	return p.proxies[idx]
+}
+
+// Disabled this picker until I have the idea fleshed out.
+// func init() {
+// 	balancer.Register(
+// 		base.NewBalancerBuilder(
+// 			Name, &Picker{
+// 				Logger: zap.L(),
+// 			},
+// 			base.Config{},
+// 		),
+// 	)
+// }
