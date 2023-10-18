@@ -70,6 +70,10 @@ type cfg struct {
 	ShutdownWaitDuration time.Duration
 	TracingEnabled       bool
 	MetricsBindAddr      string
+
+	// GroupCache
+	// GroupCacheSelf  string
+	// GroupCachePeers []string
 }
 
 func setupFlags(cmd *cobra.Command) error {
@@ -119,6 +123,10 @@ func setupFlags(cmd *cobra.Command) error {
 
 	// NFT based limits.
 	cmd.Flags().Bool("nft-based-limits-enabled", true, "Enable NFT based limits.")
+
+	// Group cache so that all nodes can work off consistant state.
+	// cmd.Flags().String("groupcache-self", "127.0.0.1:50222", "The address of this machine's group cache.")
+	// cmd.Flags().StringSlice("groupcache-peer", []string{"127.0.0.1:50222"}, "The peers this node will connect to for the group cache.")
 
 	return viper.BindPFlags(cmd.Flags())
 }
@@ -184,6 +192,10 @@ func (c *cli) setupConfig(cmd *cobra.Command, args []string) error {
 	// NFT based limits.
 	c.cfg.Config.NFTBasedLimits = viper.GetBool("nft-based-limits-enabled")
 
+	// Group cache peers.
+	// c.cfg.GroupCacheSelf = viper.GetString("groupcache-self")
+	// c.cfg.GroupCachePeers = viper.GetStringSlice("groupcache-peer")
+
 	return nil
 }
 
@@ -226,17 +238,16 @@ func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
 		return err
 	}
 
-	// HTTP server for metrics
+	// HTTP server for metrics.
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	server := &http.Server{
+	metricsServer := &http.Server{
 		Addr:    c.cfg.MetricsBindAddr,
 		Handler: mux,
 	}
-
 	go func() {
 		c.cfg.Config.Logger.Info("serving metrics", zap.String("endpoint", "/metrics"), zap.String("addr", c.cfg.MetricsBindAddr))
-		if err := server.ListenAndServe(); err != nil {
+		if err := metricsServer.ListenAndServe(); err != nil {
 			if err == http.ErrServerClosed {
 				c.cfg.Config.Logger.Info("stopped http /metrics server gracefully", zap.String("endpoint", "/metrics"), zap.String("addr", c.cfg.MetricsBindAddr))
 			} else {
@@ -246,6 +257,31 @@ func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
 			return
 		}
 	}()
+
+	// TODO: If we want all the proxies to stay in sync we'll need to spin up etcd.
+	//
+	//
+	//
+
+	// Group cache server.
+	// p := groupcache.NewHTTPPool(c.cfg.GroupCacheSelf)
+	// if len(c.cfg.GroupCachePeers) > 0 {
+	// 	p.Set(c.cfg.GroupCachePeers...)
+	// }
+	// groupCacheServer := &http.Server{
+	// 	Addr:    c.cfg.GroupCacheSelf,
+	// 	Handler: p,
+	// }
+	// go func() {
+	// 	c.cfg.Config.Logger.Info("serving group cache", zap.String("addr", c.cfg.GroupCacheSelf), zap.Strings("peers", c.cfg.GroupCachePeers))
+	// 	if err := groupCacheServer.ListenAndServe(); err != nil {
+	// 		if err == http.ErrServerClosed {
+	// 			c.cfg.Config.Logger.Info("stopped http group cache server gracefully", zap.String("addr", c.cfg.GroupCacheSelf), zap.Strings("peers", c.cfg.GroupCachePeers))
+	// 		} else {
+	// 			c.cfg.Config.Logger.Error("error serving group cache", zap.String("addr", c.cfg.GroupCacheSelf), zap.Strings("peers", c.cfg.GroupCachePeers), zap.Error(err))
+	// 		}
+	// 	}
+	// }()
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
@@ -257,9 +293,14 @@ func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
 	// Shutdown the server with a context timeout
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.ShutdownWaitDuration)
 	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
+	if err := metricsServer.Shutdown(ctx); err != nil {
 		fmt.Printf("Server forced to shutdown: %v\n", err)
+		c.cfg.Config.Logger.Error("metrics server failed to shutdown gracefully", zap.String("endpoint", "/metrics"), zap.String("addr", c.cfg.MetricsBindAddr), zap.Error(err))
 	}
+	// if err := groupCacheServer.Shutdown(ctx); err != nil {
+	// 	fmt.Printf("Server forced to shutdown: %v\n", err)
+	// 	c.cfg.Config.Logger.Error("group cache server failed to shutdown gracefully", zap.String("addr", c.cfg.GroupCacheSelf), zap.Strings("peers", c.cfg.GroupCachePeers), zap.Error(err))
+	// }
 	return
 }
 

@@ -10,20 +10,38 @@ import (
 
 type HapiServer struct {
 	nftBasedLimits bool
+	// accountsCache  *groupcache.Group
 }
 
 func NewHapiServer(nftBasedLimits bool) *HapiServer {
-	return &HapiServer{
+	h := &HapiServer{
 		nftBasedLimits: nftBasedLimits,
 	}
+
+	// Create a group cache for account information.
+	// h.accountsCache = groupcache.NewGroup("accounts", 1<<30,
+	// 	groupcache.GetterFunc(h.getAccountFromCache),
+	// )
+
+	return h
 }
+
+// func (h HapiServer) getAccountFromCache(ctx groupcache.Context, key string, dest groupcache.Sink) error {
+// 	// When a cache miss occurs, generate the greeting
+// 	result := fmt.Sprintf("Hello, %s!", key)
+// 	return dest.SetString(result)
+// }
 
 // validateTransaction takes a transaction and validates it. If the transaction
 // is invalid, it returns an error.
 func (h HapiServer) validateTransaction(ctx context.Context, tx *proto.Transaction) error {
 	// TODO: Implement this
 
-	// TODO: Validate transaction has a vaild payer account.
+	// TODO: Validate signed transaction is valid.
+	if _, err := getSignedTransaction(tx); err != nil {
+		// Return the same error that Services does when it encounters invalid SignedTransaction bytes.
+		return fmt.Errorf("invaild signed transaction bytes: %w", err)
+	}
 
 	// Verify the payer account hasn't gone over the limits.
 	if h.nftBasedLimits {

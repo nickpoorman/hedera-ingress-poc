@@ -1,0 +1,127 @@
+// package cache
+
+// import (
+// 	"context"
+// 	"fmt"
+// 	"sync"
+
+// 	"google.golang.org/grpc"
+// 	"stathat.com/c/consistent"
+// )
+
+// type Cache struct {
+// 	c *consistent.Consistent
+
+// 	itemMutex sync.RWMutex
+// 	items     map[string][]byte
+
+// 	mu          sync.RWMutex
+// 	connections map[string]*grpc.ClientConn
+// 	shutdown    bool
+// }
+
+// func NewCache() *Cache {
+// 	// Create a new consistent hash ring
+// 	c := consistent.New()
+
+// 	return &Cache{
+// 		c: c,
+// 	}
+// }
+
+// func (c *Cache) AddNode(address string, opts ...grpc.DialOption) error {
+// 	c.mu.Lock()
+// 	defer c.mu.Unlock()
+
+// 	conn, err := grpc.Dial(address, opts...)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to dial cache node: %v", err)
+// 	}
+
+// 	if err := c.AddNode(address); err != nil {
+// 		return fmt.Errorf("add node: %w", err)
+// 	}
+// 	c.connections[address] = conn
+
+// 	return nil
+// }
+
+// func (c *Cache) RemoveNode(address string) (bool, error) {
+// 	c.mu.Lock()
+// 	defer c.mu.Unlock()
+
+// 	conn, ok := c.connections[address]
+// 	if !ok {
+// 		return false, nil
+// 	}
+
+// 	if err := conn.Close(); err != nil {
+// 		return false, err
+// 	}
+
+// 	c.c.Remove(address)
+// 	delete(c.connections, address)
+
+// 	return true, nil
+// }
+
+// func (c *Cache) PutItem(key string, item []byte, replicas int) error {
+// 	c.itemMutex.Lock()
+// 	defer c.itemMutex.Unlock()
+
+// 	// Get all the nodes that are responsible for this key.
+// 	nodes, err := c.c.GetN(key, replicas)
+// 	if err != nil {
+// 		return fmt.Errorf("put item: get nodes: %w", err)
+// 	}
+
+// 	// Put the item on each node.
+// 	for _, node := range nodes {
+// 		conn, ok := c.connections[node]
+// 		if !ok {
+// 			return fmt.Errorf("put item: node not found: %s", node)
+// 		}
+// 		if err := conn.PutItem(key, item); err != nil {
+// 			return fmt.Errorf("put item on node: %w", err)
+// 		}
+// 	}
+
+// 	return nil
+// }
+
+// func (c *Cache) GetItem(key string, confirmations int) ([]byte, error) {
+// 	// Get all the nodes that are responsible for this key.
+// 	nodes, err := c.c.GetN(key, confirmations)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("get item: get nodes: %w", err)
+// 	}
+
+// 	// Put the item on each node.
+// 	for _, node := range nodes {
+// 		conn, ok := c.connections[node]
+// 		if !ok {
+// 			return nil, fmt.Errorf("put item: node not found: %s", node)
+// 		}
+// 		if err := conn.PutItem(key, item); err != nil {
+// 			return nil, fmt.Errorf("put item on node: %w", err)
+// 		}
+// 	}
+// }
+
+// func (c *Cache) RemoveItem(key string) {
+
+// }
+
+// func (c *Cache) Shutdown(ctx context.Context) {
+// 	c.mu.Lock()
+// 	defer c.mu.Unlock()
+// 	if c.shutdown {
+// 		return
+// 	}
+// 	c.shutdown = true
+
+// 	// Close all the connections.
+// 	for _, conn := range c.connections {
+// 		conn.Close()
+// 	}
+// }
